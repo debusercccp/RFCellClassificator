@@ -43,7 +43,7 @@ cd random-forest-tui
 python -m venv venv
 source venv/bin/activate       # Mac/Linux
 
-pip install scikit-learn pandas numpy rich openpyxl anndata scipy scanpy leidenalg igraph
+pip install -r requirements.txt
 ```
 
 ---

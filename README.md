@@ -37,7 +37,7 @@ Dataset, modelli e cache non sono versionati (vedi `.gitignore`).
 ## Installazione
 
 ```bash
-git clone https://github.com/tuonome/random-forest-tui.git
+git clone https://github.com/debusercccp/random-forest-tui.git
 cd random-forest-tui
 
 python -m venv venv

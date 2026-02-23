@@ -1,12 +1,12 @@
 # Random Forest TUI — Classificazione Tipi Cellulari
 
-Applicazione da terminale per classificare tipi cellulari a partire dai **livelli di espressione genica**, usando un modello Random Forest. Interfaccia TUI colorata basata su `rich`, con supporto nativo a file AnnData (`.h5ad`).
+Applicazione da terminale per classificare tipi cellulari a partire dai **livelli di espressione genica**, usando un modello Random Forest. Interfaccia TUI colorata basata su `rich`, con supporto nativo a file `.h5ad`.
 
 ---
 
 ## Funzionalita
 
-- Caricamento dataset in formato **CSV, TSV, Excel** e **.h5ad** (AnnData / CELLxGENE / Scanpy)
+- Caricamento dataset in formato **CSV, TSV, Excel** e **.h5ad** 
 - Scelta del **criterio di impurita**: Gini, Entropy (Shannon), Log-loss
 - Visualizzazione dell'**impurita per ogni nodo** di un albero (Gini o Entropia), con colori per livello
 - **Feature importance** (Mean Decrease Impurity) con barra ASCII e deviazione standard

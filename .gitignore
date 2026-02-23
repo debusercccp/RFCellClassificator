@@ -1,0 +1,35 @@
+# ─── Dataset e modelli (file grandi, non versionare) ──────────────────────────
+*.h5ad
+*.h5
+*.hdf5
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.pkl
+*.pickle
+
+# ─── Cache scanpy / anndata ────────────────────────────────────────────────────
+.scanpy/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ─── Ambienti virtuali ─────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+
+# ─── Output e log ──────────────────────────────────────────────────────────────
+*.log
+figures/
+output/
+
+# ─── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store

@@ -193,4 +193,4 @@ Per `.h5ad` la colonna target si sceglie interattivamente tra i metadati `obs`.
 | `scanpy` | Download e preprocessing PBMC3k |
 | `scipy` | Matrici sparse |
 | `openpyxl` | Lettura file Excel |
-# RFCellClassificator
+

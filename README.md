@@ -1,7 +1,7 @@
-# RFCellClassificator v2.0 — Semi-Supervised Edition
+ # RFCellClassificator 
 
 Classificazione di tipi cellulari da espressione genica (scRNA-seq).
-Interfaccia TUI Rich, pipeline semi-supervisionata, ottimizzata per Raspberry Pi.
+Interfaccia TUI Rich, pipeline semi-supervisionata.
 
 ## Struttura
 

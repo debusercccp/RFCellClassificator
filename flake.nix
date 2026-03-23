@@ -63,7 +63,7 @@
 
           shellHook = ''
             echo ""
-            echo "  🧬  RFCellClassificator v2.0 — dev shell"
+            echo "     RFCellClassificator v2.0 — dev shell"
             echo "  Python: $(python --version)"
             echo "  BLAS:   openblas (ottimizzato)"
             echo ""

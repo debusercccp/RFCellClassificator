@@ -186,10 +186,35 @@ def load_dataset(path, label_col=None):
         idx = IntPrompt.ask("Indice colonna target", default=df.shape[1] - 1)
         label_col = df.columns[idx]
     X = df.drop(columns=[label_col])
-    y = df[label_col]
+    y = df[label_col].astype(str)
     _print_distribution(y.values)
     for cls in y.unique():
         color_map.get(str(cls))
+
+    # Assicura che le feature siano numeriche: se non lo sono, probabilmente
+    # è stata scelta la colonna target sbagliata e sono rimaste stringhe in X.
+    if isinstance(X, pd.DataFrame):
+        bad_cols = []
+        X_num = X.copy()
+        for col in X.columns:
+            if pd.api.types.is_numeric_dtype(X[col]):
+                continue
+            converted = pd.to_numeric(X[col], errors="coerce")
+            # Se ci sono valori non-NA originali che diventano NA dopo conversione,
+            # significa che ci sono stringhe/non numeri in quella feature.
+            non_null_mask = X[col].notna()
+            if (non_null_mask & converted.isna()).any():
+                bad_cols.append(col)
+            X_num[col] = converted
+
+        if bad_cols:
+            raise ValueError(
+                "Le feature contengono valori non numerici. Probabilmente hai selezionato "
+                "come target una colonna sbagliata (es. i label tipo 'CD4 T cell' sono rimasti in X). "
+                f"Colonne problematiche: {bad_cols[:10]}"
+            )
+        X = X_num
+
     return X, y, list(X.columns)
 
 
@@ -218,13 +243,27 @@ def ask_criterion():
 
 def train_model(X, y, n_trees=100, max_depth=None, criterion="gini"):
     console.print(f"\n[bold cyan]Training: {n_trees} alberi | criterio: [yellow]{criterion}[/yellow][/bold cyan]")
+    if isinstance(X, pd.DataFrame):
+        non_numeric = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c])]
+        if non_numeric:
+            raise ValueError(
+                "Dataset non valido: alcune feature non sono numeriche. "
+                "Riprova scegliendo la colonna target corretta (label) e assicurati "
+                "che le feature siano solo numeri."
+            )
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     model = RandomForestClassifier(
         n_estimators=n_trees, max_depth=max_depth,
         criterion=criterion, random_state=42, n_jobs=-1,
     )
     for _ in track(range(1), description="Allenamento..."):
-        model.fit(X_train, y_train)
+        try:
+            model.fit(X_train, y_train)
+        except ValueError as e:
+            raise ValueError(
+                f"Errore in training (features non convertibili): {e}. "
+                "Probabilmente hai lasciato i label (stringhe) in X. Ricarica dataset e seleziona correttamente la colonna target."
+            ) from e
     console.print("[green]Training completato![/green]")
     y_pred = model.predict(X_test)
     report = classification_report(y_test, y_pred, output_dict=True)
@@ -1111,7 +1150,14 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
             criterion = ask_criterion()
 
             X, y, feature_names = X_tmp, y_tmp, feature_names_tmp
-            model = train_model(X, y, n_trees, max_depth, criterion)
+            try:
+                model = train_model(X, y, n_trees, max_depth, criterion)
+            except ValueError as e:
+                console.print(f"[red]Training fallito:[/red] {e}")
+                console.print("[yellow]Torna al menu e riprova con un'altra scelta della colonna target (opzione 1).[/yellow]")
+                model = None
+                feature_names = X = y = None
+                continue
 
             # Carica anche adata se è h5ad (best-effort)
             if path.lower().endswith(".h5ad"):

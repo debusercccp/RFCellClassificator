@@ -57,6 +57,21 @@ except ImportError:
 console = Console()
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Utilità path
+# ══════════════════════════════════════════════════════════════════════════════
+
+def normalize_path(path: str) -> str:
+    """
+    Espande `~` e variabili ambiente e restituisce un path assoluto.
+    Serve soprattutto per input utente tipo '~/dataset.h5ad'.
+    """
+    if path is None:
+        return path
+    p = os.path.expandvars(str(path).strip())
+    p = os.path.expanduser(p)
+    return os.path.abspath(p)
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Colori cell type  (identici all'originale)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -108,6 +123,7 @@ def print_banner():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def load_h5ad(path, label_col=None):
+    path = normalize_path(path)
     try:
         import anndata as ad
     except ImportError:
@@ -139,6 +155,7 @@ def load_h5ad(path, label_col=None):
 
 
 def load_dataset(path, label_col=None):
+    path = normalize_path(path)
     console.print(f"[dim]Caricamento:[/dim] [yellow]{path}[/yellow]")
     ext = os.path.splitext(path)[1].lower()
     if ext in (".h5ad", ".h5", ".hdf5"):
@@ -905,12 +922,14 @@ def run_dashboard(semi_result=None):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_model(model, path="forest_model.pkl"):
+    path = normalize_path(path)
     with open(path, "wb") as f:
         pickle.dump(model, f)
     console.print(f"[green]Modello salvato:[/green] [yellow]{path}[/yellow]")
 
 
 def load_model(path):
+    path = normalize_path(path)
     with open(path, "rb") as f:
         model = pickle.load(f)
     console.print(f"[green]Modello caricato:[/green] [yellow]{path}[/yellow]")
@@ -926,7 +945,7 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
     while True:
         console.print(Rule(style="dim"))
         console.print("[bold]Menu:[/bold]")
-        # ── Originali ────────────────────────────────────────────────
+        # Sezione base (originale)
         console.print("  [cyan]1[/cyan]  Carica dataset e allena        [dim](CSV/TSV/Excel/H5AD)[/dim]")
         console.print("  [cyan]2[/cyan]  Albero random")
         console.print("  [cyan]3[/cyan]  Albero a scelta")
@@ -938,7 +957,8 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
         console.print("  [cyan]9[/cyan]  Carica modello")
         console.print("  [cyan]L[/cyan]  Legenda colori")
         console.print("  [cyan]E[/cyan]  Converti .h5ad → CSV")
-        # ── Novità v2.0 ──────────────────────────────────────────────
+
+        # Opzioni v2.0
         console.print(Rule(characters="─", style="dim cyan"))
         semi_ok = "[green]✓[/green]" if SEMI_AVAILABLE else "[red]✗[/red]"
         console.print(f"  [bold cyan]S[/bold cyan]  Pipeline Semi-Supervisionata   "
@@ -958,7 +978,7 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
 
         # ── Opzioni originali ─────────────────────────────────────────
         if choice == "1":
-            path = Prompt.ask("Path dataset di training")
+            path = normalize_path(Prompt.ask("Path dataset di training"))
             n_trees = IntPrompt.ask("Numero di alberi", default=100)
             md = Prompt.ask("Profondità massima (invio = illimitata)", default="")
             max_depth = int(md) if md.strip() else None
@@ -966,7 +986,7 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
             X, y, feature_names = load_dataset(path)
             model = train_model(X, y, n_trees, max_depth, criterion)
             # Carica anche adata se è h5ad
-            if path.endswith(".h5ad"):
+            if path.lower().endswith(".h5ad"):
                 try:
                     import anndata as ad
                     adata = ad.read_h5ad(path)
@@ -1021,8 +1041,8 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
             color_map.legend()
 
         elif choice == "E":
-            h5ad_path = Prompt.ask("Path .h5ad")
-            out_path = Prompt.ask("Output CSV", default="expression_matrix.csv")
+            h5ad_path = normalize_path(Prompt.ask("Path .h5ad"))
+            out_path = normalize_path(Prompt.ask("Output CSV", default="expression_matrix.csv"))
             Xe, ye, genes = load_h5ad(h5ad_path)
             df_out = Xe.copy()
             df_out["cell_type"] = ye.values
@@ -1077,7 +1097,7 @@ def main():
         if args.dataset.endswith(".h5ad"):
             try:
                 import anndata as ad
-                adata = ad.read_h5ad(args.dataset)
+                adata = ad.read_h5ad(normalize_path(args.dataset))
             except Exception:
                 pass
 

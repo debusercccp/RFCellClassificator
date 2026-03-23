@@ -1,0 +1,17 @@
+# RFCellClassificator v2.0 requirements
+# ── Core (invariato) ──────────────────────────────────────────────────────
+scikit-learn>=1.3
+pandas
+numpy
+rich
+anndata
+scipy
+
+# ── v2.0 (pipeline semi-supervisionata) ──────────────────────────────────
+# psutil: CPU monitor nella dashboard (opzionale ma consigliato su Pi)
+psutil
+
+# ── Preprocessing dataset (scarica_dataset.py) ───────────────────────────
+scanpy
+leidenalg
+igraph

@@ -39,7 +39,6 @@ python random_forest_tui.py
 | `S`   | **Pipeline semi-supervisionata**: Clustering → Marker Genes → RF → Consensus → Confidence |
 | `K`   | **Clustering standalone**: Lloyd KMeans + visualizzazione cluster + marker genes |
 | `C`   | **Confidence score**: distanza euclidea cellula → centroide, Unknown labeling |
-| `D`   | **Dashboard live**: CPU Pi, cluster, confusion matrix, statistiche RF |
 
 ## Pipeline semi-supervisionata [S]
 

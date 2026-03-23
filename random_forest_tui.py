@@ -434,9 +434,25 @@ def run_semi_supervised(current_adata=None):
 
     # ── Caricamento AnnData ────────────────────────────────────────────
     if current_adata is None:
-        path = Prompt.ask("Path dataset H5AD")
-        console.print(f"[dim]Lettura:[/dim] [yellow]{path}[/yellow]")
-        adata = ad.read_h5ad(path)
+        path_in = Prompt.ask("Path dataset H5AD")
+        path = normalize_path(path_in)
+        if not path:
+            console.print("[red]Path .h5ad vuoto: annullo la pipeline.[/red]")
+            return None, None
+        if os.path.isdir(path):
+            console.print("[red]Hai inserito una directory, atteso un file .h5ad.[/red]")
+            console.print(f"[yellow]{path}[/yellow]")
+            return None, None
+        if not os.path.exists(path):
+            console.print("[red]File .h5ad non trovato.[/red]")
+            console.print(f"[yellow]{path}[/yellow]")
+            return None, None
+        try:
+            console.print(f"[dim]Lettura:[/dim] [yellow]{path}[/yellow]")
+            adata = ad.read_h5ad(path)
+        except Exception as e:
+            console.print(f"[red]Impossibile leggere .h5ad:[/red] {type(e).__name__}: {e}")
+            return None, None
     else:
         adata = current_adata
         console.print(f"[green]Uso AnnData già caricato:[/green] {adata.n_obs} cellule × {adata.n_vars} geni")
@@ -656,9 +672,25 @@ def run_clustering_standalone():
         console.print("[red]anndata non installata.[/red]")
         return
 
-    path = Prompt.ask("Path dataset H5AD")
-    adata = ad.read_h5ad(path)
-    console.print(f"[green]Letto:[/green] {adata.n_obs} cellule × {adata.n_vars} geni")
+    path_in = Prompt.ask("Path dataset H5AD")
+    path = normalize_path(path_in)
+    if not path:
+        console.print("[red]Path .h5ad vuoto: annullo clustering.[/red]")
+        return
+    if os.path.isdir(path):
+        console.print("[red]Hai inserito una directory, atteso un file .h5ad.[/red]")
+        console.print(f"[yellow]{path}[/yellow]")
+        return
+    if not os.path.exists(path):
+        console.print("[red]File .h5ad non trovato.[/red]")
+        console.print(f"[yellow]{path}[/yellow]")
+        return
+    try:
+        adata = ad.read_h5ad(path)
+        console.print(f"[green]Letto:[/green] {adata.n_obs} cellule × {adata.n_vars} geni")
+    except Exception as e:
+        console.print(f"[red]Impossibile leggere .h5ad:[/red] {type(e).__name__}: {e}")
+        return
 
     k = IntPrompt.ask("Numero di cluster", default=10)
     n_markers = IntPrompt.ask("Marker genes da mostrare", default=20)

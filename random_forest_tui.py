@@ -706,23 +706,56 @@ def run_confidence_check(model, feature_names, X=None, y=None):
     console.print("\n[bold cyan]Confidence Score Euclideo[/bold cyan]")
     conf_pct = IntPrompt.ask("Percentile soglia (0-100)", default=95)
 
-    # Prepara dati numpy
-    X_arr = X.values.astype(np.float32) if hasattr(X, "values") else np.array(X, dtype=np.float32)
+    # Allinea feature order e preserva nomi colonna per evitare warning sklearn
+    feature_order = list(feature_names) if feature_names is not None else None
+    if hasattr(X, "columns"):
+        X_df = X.copy()
+        if feature_order:
+            X_df = X_df.loc[:, feature_order]
+    else:
+        if not feature_order:
+            console.print("[red]Impossibile ricostruire l'ordine delle feature.[/red]")
+            return
+        X_df = pd.DataFrame(np.asarray(X), columns=feature_order)
+
+    # Prepara dati numpy per la parte euclidea
+    X_arr = X_df.values.astype(np.float32)
     y_arr = np.array(y)
     le = LabelEncoder()
     y_enc = le.fit_transform(y_arr)
 
     from sklearn.model_selection import train_test_split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_arr, y_enc, test_size=0.2, random_state=42, stratify=y_enc)
-
-    y_pred = model.predict(X_test)
-    scores, unknown_mask = euclidean_confidence(
-        X_test=X_test, y_pred=y_pred,
-        X_train=X_train, y_train=y_train,
-        percentile_threshold=float(conf_pct),
+    X_train_df, X_test_df, y_train, y_test = train_test_split(
+        X_df, y_enc, test_size=0.2, random_state=42, stratify=y_enc
     )
-    final_labels = label_with_confidence(y_pred, unknown_mask, le)
+    X_train = X_train_df.values.astype(np.float32)
+    X_test = X_test_df.values.astype(np.float32)
+
+    # Predizione RF con DataFrame (nomi feature presenti)
+    y_pred = model.predict(X_test_df)
+
+    # Encode delle label predette per matchare le chiavi dei centroidi (y_train è encodato)
+    try:
+        y_pred_enc = le.transform(y_pred)
+    except Exception:
+        # Caso limite: RF produce label non viste in training (o mismatch).
+        # Mettiamo -1 e poi verrà forzato Unknown.
+        known = set(le.classes_)
+        y_pred_enc = np.array([le.transform([lbl])[0] if lbl in known else -1 for lbl in y_pred], dtype=int)
+
+    try:
+        scores, unknown_mask = euclidean_confidence(
+            X_test=X_test,
+            y_pred=y_pred_enc,
+            X_train=X_train,
+            y_train=y_train,
+            percentile_threshold=float(conf_pct),
+        )
+        final_labels = label_with_confidence(y_pred_enc, unknown_mask, le)
+    except Exception as e:
+        console.print(f"[red]Errore durante confidence: {type(e).__name__}: {e}[/red]")
+        console.print("[dim]Suggerimento: prova di nuovo con un altro dataset o riduci confidenza percentile.[/dim]")
+        return
 
     n_unknown = unknown_mask.sum()
     console.print(Panel(
@@ -741,7 +774,7 @@ def run_confidence_check(model, feature_names, X=None, y=None):
     table.add_column("Score", justify="right")
     unknown_idx = np.where(unknown_mask)[0]
     for i in unknown_idx[:20]:
-        rf_label = le.inverse_transform([y_pred[i]])[0]
+        rf_label = y_pred[i]
         table.add_row(
             str(i),
             Text(rf_label, style=color_map.get(rf_label)),
@@ -757,9 +790,9 @@ def run_confidence_check(model, feature_names, X=None, y=None):
     table2.add_column("Classe")
     table2.add_column("Score medio", justify="right")
     table2.add_column("Unknown", justify="right")
-    for label in np.unique(y_pred):
-        mask = y_pred == label
-        cls_name = le.inverse_transform([label])[0]
+    for label in np.unique(y_pred_enc):
+        mask = y_pred_enc == label
+        cls_name = le.inverse_transform([label])[0] if label >= 0 else "Unknown / New Cell Type"
         avg_score = scores[mask].mean()
         n_unk = unknown_mask[mask].sum()
         style = "red" if avg_score > 0.8 else "yellow" if avg_score > 0.5 else "green"

@@ -38,7 +38,14 @@ def euclidean_confidence(
     scores       : float array, score normalizzato (0=vicino, >1=Unknown)
     unknown_mask : bool array, True dove la cellula è Unknown
     """
+    if not (0.0 <= percentile_threshold <= 100.0):
+        raise ValueError(f"percentile_threshold deve essere tra 0 e 100, ricevuto: {percentile_threshold}")
+
     centroids = compute_class_centroids(X_train, y_train)
+    if not centroids:
+        scores = np.full(shape=(len(y_pred),), fill_value=np.inf, dtype=float)
+        unknown_mask = np.ones_like(scores, dtype=bool)
+        return scores, unknown_mask
 
     # Soglia per classe: percentile delle distanze intra-classe nel training
     thresholds: dict[int, float] = {}
@@ -56,7 +63,17 @@ def euclidean_confidence(
         if y_pred[i] in centroids else np.inf
         for i in range(len(y_pred))
     ])
-    thresh_arr = np.array([thresholds.get(int(p), 1.0) for p in y_pred])
+    # Robustezza: y_pred può arrivare come int encodati o, in casi limite, come stringhe
+    def _threshold_for_label(lbl) -> float:
+        if lbl in thresholds:
+            return thresholds[lbl]
+        try:
+            lbl_int = int(lbl)
+            return thresholds.get(lbl_int, 1.0)
+        except Exception:
+            return 1.0
+
+    thresh_arr = np.array([_threshold_for_label(p) for p in y_pred], dtype=float)
     thresh_arr = np.where(thresh_arr == 0, 1e-9, thresh_arr)
 
     scores = raw / thresh_arr
@@ -71,6 +88,15 @@ def label_with_confidence(
     unknown_label: str = "Unknown / New Cell Type",
 ) -> np.ndarray:
     """Decodifica label RF e sovrascrive Unknown dove indicato dalla maschera."""
-    decoded = label_encoder.inverse_transform(y_pred).astype(object)
+    y_pred = np.asarray(y_pred)
+    unknown_mask = np.asarray(unknown_mask, dtype=bool)
+    decoded = np.empty(shape=y_pred.shape, dtype=object)
+    decoded[:] = unknown_label
+
+    # inverse_transform fallisce se ci sono valori fuori range (es. -1)
+    valid = y_pred >= 0
+    if np.any(valid):
+        decoded[valid] = label_encoder.inverse_transform(y_pred[valid]).astype(object)
+
     decoded[unknown_mask] = unknown_label
     return decoded

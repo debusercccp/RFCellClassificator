@@ -963,8 +963,24 @@ def save_model(model, path="forest_model.pkl"):
 
 def load_model(path):
     path = normalize_path(path)
-    with open(path, "rb") as f:
-        model = pickle.load(f)
+    if not path:
+        console.print("[red]Path modello vuoto.[/red]")
+        return None
+    if os.path.isdir(path):
+        console.print(f"[red]Il percorso non è un file (è una directory):[/red] [yellow]{path}[/yellow]")
+        return None
+    if not os.path.exists(path):
+        console.print(f"[red]File modello non trovato:[/red] [yellow]{path}[/yellow]")
+        return None
+    try:
+        with open(path, "rb") as f:
+            model = pickle.load(f)
+    except (IsADirectoryError, FileNotFoundError):
+        console.print(f"[red]Impossibile aprire il file modello:[/red] [yellow]{path}[/yellow]")
+        return None
+    except Exception as e:
+        console.print(f"[red]Impossibile caricare il modello:[/red] {type(e).__name__}: {e}")
+        return None
     console.print(f"[green]Modello caricato:[/green] [yellow]{path}[/yellow]")
     return model
 
@@ -1067,6 +1083,10 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
         elif choice == "9":
             path = Prompt.ask("Path modello .pkl")
             model = load_model(path)
+            if model is None:
+                # Non crashare: torna al menu
+                console.print("[yellow]Nessun modello caricato. Riprova.[/yellow]")
+                continue
             fn = Prompt.ask("Feature names (virgola, o invio)", default="")
             feature_names = [f.strip() for f in fn.split(",")] if fn.strip() else []
 
@@ -1123,6 +1143,8 @@ def main():
 
     if args.model:
         model = load_model(args.model)
+        if model is None:
+            console.print("[yellow]Opzione --model fallita: continuo senza modello.[/yellow]")
 
     if args.dataset:
         X, y, feature_names = load_dataset(args.dataset)

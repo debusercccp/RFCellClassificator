@@ -33,3 +33,5 @@ output/
 *.swp
 *.swo
 .DS_Store
+
+.ipynb

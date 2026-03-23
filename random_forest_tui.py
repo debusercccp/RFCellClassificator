@@ -2,16 +2,12 @@
 """
 TREE / RANDOM FOREST TUI  —  v2.0 (Semi-Supervised Edition)
 Classificazione di tipi cellulari da espressione genica
-
 Formati: CSV · TSV · Excel · H5AD (AnnData / CELLxGENE)
-
 Novità v2.0:
   [S]  Pipeline semi-supervisionata (Clustering → Marker Genes → RF)
   [K]  Clustering Lloyd KMeans standalone
   [C]  Confidence score euclideo + Unknown labeling
-  [D]  Dashboard TUI: confusion matrix · cluster progress · CPU Pi
 """
-
 import os
 import sys
 import pickle
@@ -19,7 +15,6 @@ import random
 import argparse
 import threading
 import time
-
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
@@ -27,7 +22,6 @@ from sklearn.tree import export_text
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.preprocessing import LabelEncoder
-
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -42,7 +36,6 @@ from rich.live import Live
 from rich.rule import Rule
 from rich.columns import Columns
 from rich import box
-
 # ── Moduli semi-supervisionati ─────────────────────────────────────────────
 try:
     from core import (
@@ -53,36 +46,20 @@ try:
     SEMI_AVAILABLE = True
 except ImportError:
     SEMI_AVAILABLE = False
-
 console = Console()
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Utilità path
 # ══════════════════════════════════════════════════════════════════════════════
-
 def normalize_path(path: str) -> str:
-    """
-    Espande `~` e variabili ambiente e restituisce un path assoluto.
-    Serve soprattutto per input utente tipo '~/dataset.h5ad'.
-    """
     if path is None:
         return path
     p = os.path.expandvars(str(path).strip())
     p = os.path.expanduser(p)
     return os.path.abspath(p)
-
-
 def resolve_dataset_path_input(path_in: str) -> str:
-    """
-    Accetta:
-      - path a un file dataset
-      - oppure path a una directory contenente dataset supportati
-    Se è una directory, chiede quale file usare.
-    """
     p = normalize_path(path_in)
     if not p:
         return p
-
     if os.path.isdir(p):
         exts = {".csv", ".tsv", ".txt", ".xlsx", ".xls", ".h5ad", ".h5", ".hdf5"}
         files: list[str] = []
@@ -91,29 +68,22 @@ def resolve_dataset_path_input(path_in: str) -> str:
             if os.path.isfile(fp) and os.path.splitext(name)[1].lower() in exts:
                 files.append(fp)
         files.sort()
-
         if not files:
             raise FileNotFoundError(
                 f"Nessun dataset supportato trovato in directory: {p}. "
                 f"Estensioni attese: {sorted(exts)}"
             )
-
         console.print(f"[dim]Dataset trovati in directory:[/dim] {p}")
         for i, fp in enumerate(files):
             console.print(f"  [{i}] {os.path.basename(fp)}")
         idx = IntPrompt.ask("Indice dataset da usare", default=0)
         idx = max(0, min(idx, len(files) - 1))
         return files[idx]
-
     return p
-
-
 def resolve_h5ad_path_input(path_in: str) -> str:
-    """Come resolve_dataset_path_input, ma limitato a file `.h5ad`."""
     p = normalize_path(path_in)
     if not p:
         return p
-
     if os.path.isdir(p):
         files: list[str] = []
         for name in os.listdir(p):
@@ -121,42 +91,34 @@ def resolve_h5ad_path_input(path_in: str) -> str:
             if os.path.isfile(fp) and name.lower().endswith(".h5ad"):
                 files.append(fp)
         files.sort()
-
         if not files:
             raise FileNotFoundError(f"Nessun file .h5ad trovato in directory: {p}")
-
         console.print(f"[dim]File .h5ad trovati in directory:[/dim] {p}")
         for i, fp in enumerate(files):
             console.print(f"  [{i}] {os.path.basename(fp)}")
         idx = IntPrompt.ask("Indice file .h5ad da usare", default=0)
         idx = max(0, min(idx, len(files) - 1))
         return files[idx]
-
     return p
-
 # ══════════════════════════════════════════════════════════════════════════════
-# Colori cell type  (identici all'originale)
+# Colori cell type
 # ══════════════════════════════════════════════════════════════════════════════
-
 CELL_COLORS = [
     "bold red", "bold green", "bold blue", "bold yellow",
     "bold magenta", "bold cyan", "bold white", "bright_red",
     "bright_green", "bright_blue", "bright_magenta", "bright_cyan",
     "orange3", "deep_pink4", "dark_cyan", "gold1", "purple", "chartreuse3",
 ]
-
 class CellColorMapper:
     def __init__(self):
         self.mapping: dict[str, str] = {}
         self._idx = 0
-
     def get(self, label: str) -> str:
         label = str(label)
         if label not in self.mapping:
             self.mapping[label] = CELL_COLORS[self._idx % len(CELL_COLORS)]
             self._idx += 1
         return self.mapping[label]
-
     def legend(self):
         table = Table(title="Legenda Tipi Cellulari", box=box.ROUNDED, border_style="dim")
         table.add_column("Tipo Cellulare", style="bold")
@@ -164,13 +126,10 @@ class CellColorMapper:
         for label, color in self.mapping.items():
             table.add_row(Text(label, style=color), color)
         console.print(table)
-
 color_map = CellColorMapper()
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Banner
 # ══════════════════════════════════════════════════════════════════════════════
-
 def print_banner():
     console.print()
     console.print(Panel.fit(
@@ -180,11 +139,9 @@ def print_banner():
         border_style="cyan", padding=(1, 4),
     ))
     console.print()
-
 # ══════════════════════════════════════════════════════════════════════════════
-# Caricamento dataset  (identico all'originale)
+# Caricamento dataset
 # ══════════════════════════════════════════════════════════════════════════════
-
 def load_h5ad(path, label_col=None):
     path = normalize_path(path)
     if not path:
@@ -219,8 +176,6 @@ def load_h5ad(path, label_col=None):
     y = adata.obs[label_col].astype(str).values
     _print_distribution(y)
     return X, pd.Series(y), list(adata.var_names)
-
-
 def load_dataset(path, label_col=None):
     path = normalize_path(path)
     if not path:
@@ -253,9 +208,6 @@ def load_dataset(path, label_col=None):
     _print_distribution(y.values)
     for cls in y.unique():
         color_map.get(str(cls))
-
-    # Assicura che le feature siano numeriche: se non lo sono, probabilmente
-    # è stata scelta la colonna target sbagliata e sono rimaste stringhe in X.
     if isinstance(X, pd.DataFrame):
         bad_cols = []
         X_num = X.copy()
@@ -263,13 +215,10 @@ def load_dataset(path, label_col=None):
             if pd.api.types.is_numeric_dtype(X[col]):
                 continue
             converted = pd.to_numeric(X[col], errors="coerce")
-            # Se ci sono valori non-NA originali che diventano NA dopo conversione,
-            # significa che ci sono stringhe/non numeri in quella feature.
             non_null_mask = X[col].notna()
             if (non_null_mask & converted.isna()).any():
                 bad_cols.append(col)
             X_num[col] = converted
-
         if bad_cols:
             raise ValueError(
                 "Le feature contengono valori non numerici. Probabilmente hai selezionato "
@@ -277,10 +226,7 @@ def load_dataset(path, label_col=None):
                 f"Colonne problematiche: {bad_cols[:10]}"
             )
         X = X_num
-
     return X, y, list(X.columns)
-
-
 def _print_distribution(y):
     unique, counts = np.unique(y, return_counts=True)
     table = Table(title="Distribuzione classi cellulari", box=box.ROUNDED)
@@ -290,11 +236,9 @@ def _print_distribution(y):
     for cls, cnt in zip(unique, counts):
         table.add_row(Text(str(cls), style=color_map.get(str(cls))), str(cnt), f"{cnt/len(y)*100:.1f}%")
     console.print(table)
-
 # ══════════════════════════════════════════════════════════════════════════════
-# Training RF classico  (identico all'originale)
+# Training RF classico
 # ══════════════════════════════════════════════════════════════════════════════
-
 def ask_criterion():
     console.print("\n[bold]Criterio di impurità:[/bold]")
     console.print("  [cyan]1[/cyan] - [bold]Gini[/bold]     impurità di Gini (default, veloce)")
@@ -302,8 +246,6 @@ def ask_criterion():
     console.print("  [cyan]3[/cyan] - [bold]Log-loss[/bold] cross-entropy (sklearn >= 1.1)")
     choice = Prompt.ask("Scelta", choices=["1", "2", "3"], default="1")
     return {"1": "gini", "2": "entropy", "3": "log_loss"}[choice]
-
-
 def train_model(X, y, n_trees=100, max_depth=None, criterion="gini"):
     console.print(f"\n[bold cyan]Training: {n_trees} alberi | criterio: [yellow]{criterion}[/yellow][/bold cyan]")
     if isinstance(X, pd.DataFrame):
@@ -347,21 +289,16 @@ def train_model(X, y, n_trees=100, max_depth=None, criterion="gini"):
     console.print(table)
     console.print(f"[bold]Accuracy:[/bold] [green]{report['accuracy']:.2%}[/green]")
     return model
-
 # ══════════════════════════════════════════════════════════════════════════════
-# Visualizzazione alberi  (identica all'originale)
+# Visualizzazione alberi
 # ══════════════════════════════════════════════════════════════════════════════
-
 def _align_feature_names(model_or_tree, feature_names):
-    """Allinea feature_names alla dimensione effettiva dell'albero/modello."""
     if hasattr(model_or_tree, "estimators_"):
         n = model_or_tree.estimators_[0].tree_.n_features
     else:
         n = model_or_tree.tree_.n_features
     fn = list(feature_names) if feature_names else []
     return fn if len(fn) == n else [f"feature_{i}" for i in range(n)]
-
-
 def show_tree(model, feature_names, mode="random", tree_idx=None):
     n = len(model.estimators_)
     if mode == "random":
@@ -378,8 +315,6 @@ def show_tree(model, feature_names, mode="random", tree_idx=None):
         title=f"Albero #{tree_idx} | {model.criterion}",
         border_style="green", expand=False,
     ))
-
-
 def show_node_impurity(model, feature_names):
     n = len(model.estimators_)
     tree_idx = IntPrompt.ask(f"Indice albero (0-{n-1})", default=0)
@@ -409,8 +344,6 @@ def show_node_impurity(model, feature_names):
                           Text("split", style="bold white"))
     console.print(table)
     console.print("[dim]Colori:[/dim] [green]< 0.2 bassa[/green]  [yellow]0.2-0.4 media[/yellow]  [red]> 0.4 alta[/red]")
-
-
 def show_feature_importance(model, feature_names, top_n=20):
     importances = model.feature_importances_
     fn = _align_feature_names(model, feature_names)
@@ -428,13 +361,10 @@ def show_feature_importance(model, feature_names, top_n=20):
     table.add_column("Std", justify="right")
     table.add_column("Barra")
     max_imp = importances[indices[0]] if len(indices) else 1.0
-
-    # Marker scores se disponibili (dalla pipeline semi-supervisionata)
     marker_score_map: dict[str, float] = {}
     if hasattr(model, "_marker_scores") and model._marker_scores is not None:
         for g, s in zip(model._marker_genes, model._marker_scores):
             marker_score_map[g] = float(s)
-
     for rank, idx in enumerate(indices, 1):
         idx = int(idx)
         imp = importances[idx]
@@ -450,8 +380,6 @@ def show_feature_importance(model, feature_names, top_n=20):
     console.print(table)
     console.print(f"[dim]MDI = riduzione media impurità ({criterion}) pesata per campioni.[/dim]")
     console.print(f"[dim]Marker Score = variance_ratio dal clustering (colonna extra v2.0).[/dim]")
-
-
 def compare_criteria(X, y, n_trees=100, max_depth=None):
     console.print("\n[bold cyan]Confronto Gini vs Entropy...[/bold cyan]")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -490,8 +418,6 @@ def compare_criteria(X, y, n_trees=100, max_depth=None):
     )
     console.print(table)
     return results[best_acc][0]
-
-
 def predict_test(model, feature_names, path=None, label_col=None):
     if path is None:
         path = Prompt.ask("Path del dataset di test")
@@ -514,27 +440,18 @@ def predict_test(model, feature_names, path=None, label_col=None):
             row.append(Text(f"{match} {real}", style="green" if real == pred_str else "red"))
         table.add_row(*row)
     console.print(table)
-
 # ══════════════════════════════════════════════════════════════════════════════
 # NOVITÀ v2.0 — Pipeline Semi-Supervisionata
 # ══════════════════════════════════════════════════════════════════════════════
-
 def run_semi_supervised(current_adata=None):
-    """
-    Opzione [S]: Pipeline completa Clustering → Marker Genes → RF.
-    Mostra progress bar live durante l'elaborazione.
-    """
     if not SEMI_AVAILABLE:
         console.print("[red]Moduli core/ non trovati.[/red] Assicurati che core/ sia nella stessa directory.")
         return None, None
-
     try:
         import anndata as ad
     except ImportError:
         console.print("[red]anndata non installata.[/red]")
         return None, None
-
-    # ── Caricamento AnnData ────────────────────────────────────────────
     if current_adata is None:
         path_in = Prompt.ask("Path dataset H5AD (file o directory)")
         try:
@@ -554,15 +471,12 @@ def run_semi_supervised(current_adata=None):
     else:
         adata = current_adata
         console.print(f"[green]Uso AnnData già caricato:[/green] {adata.n_obs} cellule × {adata.n_vars} geni")
-
     obs_cols = list(adata.obs.columns)
     console.print("\n[bold]Colonne disponibili:[/bold]")
     for i, col in enumerate(obs_cols):
         console.print(f"  [{i}] {col} [dim]({adata.obs[col].nunique()} unici)[/dim]")
     idx = IntPrompt.ask("Colonna target (cell type)", default=0)
     label_key = obs_cols[idx]
-
-    # ── Configurazione pipeline ────────────────────────────────────────
     console.print("\n[bold cyan]Configurazione pipeline semi-supervisionata:[/bold cyan]")
     n_clusters = IntPrompt.ask("Numero di cluster KMeans", default=10)
     n_markers   = IntPrompt.ask("Marker genes da selezionare", default=200)
@@ -571,7 +485,6 @@ def run_semi_supervised(current_adata=None):
     md = Prompt.ask("Profondità massima RF (invio = illimitata)", default="")
     max_depth = int(md) if md.strip() else None
     conf_pct = IntPrompt.ask("Percentile soglia confidence (0-100)", default=95)
-
     cfg = PipelineConfig(
         n_clusters=n_clusters,
         marker_n_top=n_markers,
@@ -583,28 +496,21 @@ def run_semi_supervised(current_adata=None):
         enable_consensus=True,
         enable_confidence=True,
     )
-
-    # ── Esecuzione con progress bar ────────────────────────────────────
     pipeline = SemiSupervisedPipeline(cfg)
     result_holder: list = []
     error_holder:  list = []
-
     progress_status = {"step": "Avvio...", "pct": 0}
-
     def cb(step: str, pct: int):
         progress_status["step"] = step
         progress_status["pct"] = pct
-
     def worker():
         try:
             r = pipeline.fit_predict(adata, label_key=label_key, progress_callback=cb)
             result_holder.append(r)
         except Exception as e:
             error_holder.append(e)
-
     t = threading.Thread(target=worker, daemon=True)
     t.start()
-
     with Progress(
         SpinnerColumn(),
         TextColumn("[bold cyan]{task.description}"),
@@ -620,31 +526,20 @@ def run_semi_supervised(current_adata=None):
                             description=progress_status["step"])
             time.sleep(0.15)
         progress.update(task, completed=100, description="Completato")
-
     if error_holder:
         console.print(f"[red]Errore durante la pipeline:[/red] {error_holder[0]}")
         import traceback; traceback.print_exc()
         return None, None
-
     result: PipelineResult = result_holder[0]
-
-    # ── Riepilogo pipeline ─────────────────────────────────────────────
     _print_pipeline_summary(result)
-
-    # ── Attacca marker scores al modello per show_feature_importance ───
     rf = result.rf_model
     rf._marker_genes = result.selected_genes
     rf._marker_scores = result.marker_scores
-
     return rf, result.selected_genes, result
 
-
 def _print_pipeline_summary(result: "PipelineResult"):
-    """Stampa il riepilogo completo della pipeline semi-supervisionata."""
     le = result.label_encoder
     report = result.class_report_dict
-
-    # ── Riquadro statistiche pipeline ────────────────────────────────
     ratio = result.n_genes_original / max(result.n_genes_selected, 1)
     summary = Panel(
         f"[bold]Geni originali:[/bold]  {result.n_genes_original:>6}\n"
@@ -660,8 +555,6 @@ def _print_pipeline_summary(result: "PipelineResult"):
         padding=(0, 2),
     )
     console.print(summary)
-
-    # ── Classification report ─────────────────────────────────────────
     table = Table(title="Risultati RF su Marker Genes", box=box.ROUNDED)
     table.add_column("Classe", style="bold")
     table.add_column("Precision", justify="right")
@@ -678,17 +571,10 @@ def _print_pipeline_summary(result: "PipelineResult"):
         )
     console.print(table)
     console.print(f"[bold]Accuracy:[/bold] [green]{report['accuracy']:.2%}[/green]")
-
-    # ── Top marker genes ──────────────────────────────────────────────
     _print_marker_genes(result.selected_genes[:15], result.marker_scores[:15])
-
-    # ── Consensus conflicts ───────────────────────────────────────────
     if result.n_conflicts > 0:
         _print_consensus_report(result, le)
-
-    # ── Confusion matrix ──────────────────────────────────────────────
     _print_confusion_matrix(result.confusion_mat, le.classes_)
-
 
 def _print_marker_genes(genes: list[str], scores: np.ndarray):
     table = Table(title="Top Marker Genes (Clustering → RF)", box=box.SIMPLE)
@@ -701,7 +587,6 @@ def _print_marker_genes(genes: list[str], scores: np.ndarray):
         bar = "█" * int((s / max_s) * 20)
         table.add_row(str(i), g, f"{s:.5f}", Text(bar, style="gold1"))
     console.print(table)
-
 
 def _print_consensus_report(result: "PipelineResult", le: LabelEncoder):
     n_total = len(result.y_pred)
@@ -734,8 +619,6 @@ def _print_consensus_report(result: "PipelineResult", le: LabelEncoder):
         "dominante disaccordano — potenziale errore di annotazione "
         "o cellula in stato di transizione.[/dim]"
     )
-
-
 def _print_confusion_matrix(cm: np.ndarray, class_names: np.ndarray):
     n = len(class_names)
     if n > 10:
@@ -754,13 +637,10 @@ def _print_confusion_matrix(cm: np.ndarray, class_names: np.ndarray):
             row_vals.append(Text(str(val), style=style))
         table.add_row(Text(cls[:12], style=color_map.get(cls)), *row_vals)
     console.print(table)
-
 # ══════════════════════════════════════════════════════════════════════════════
 # NOVITÀ v2.0 — Clustering Standalone
 # ══════════════════════════════════════════════════════════════════════════════
-
 def run_clustering_standalone():
-    """Opzione [K]: Lloyd KMeans standalone su H5AD, senza RF."""
     if not SEMI_AVAILABLE:
         console.print("[red]Moduli core/ non trovati.[/red]")
         return
@@ -769,7 +649,6 @@ def run_clustering_standalone():
     except ImportError:
         console.print("[red]anndata non installata.[/red]")
         return
-
     path_in = Prompt.ask("Path dataset H5AD (file o directory)")
     try:
         path = resolve_h5ad_path_input(path_in)
@@ -785,20 +664,15 @@ def run_clustering_standalone():
     except Exception as e:
         console.print(f"[red]Impossibile leggere .h5ad:[/red] {type(e).__name__}: {e}")
         return
-
     k = IntPrompt.ask("Numero di cluster", default=10)
     n_markers = IntPrompt.ask("Marker genes da mostrare", default=20)
-
     with Progress(SpinnerColumn(), TextColumn("[cyan]{task.description}"),
                   BarColumn(), TimeElapsedColumn(), console=console, transient=True) as prog:
         task = prog.add_task("Lloyd KMeans...", total=None)
         result = cluster_anndata(adata, k=k, max_iter=200)
         prog.update(task, completed=True)
-
     console.print(f"\n[green]Clustering completato:[/green] {result.n_iter} iterazioni | "
                   f"inertia: {result.inertia:.2f}")
-
-    # Distribuzione cluster
     unique, counts = np.unique(result.labels, return_counts=True)
     table = Table(title=f"Distribuzione {k} Cluster (Lloyd KMeans)", box=box.ROUNDED)
     table.add_column("Cluster", justify="right")
@@ -811,23 +685,14 @@ def run_clustering_standalone():
         table.add_row(str(cl), str(cnt), f"{cnt/len(result.labels)*100:.1f}%",
                       Text(bar, style="cyan"))
     console.print(table)
-
-    # Marker genes
     console.print("\n[dim]Selezione marker genes...[/dim]")
     genes, scores = select_marker_genes(adata, result.labels, n_top=n_markers)
     _print_marker_genes(genes[:n_markers], scores[:n_markers])
-
     console.print(f"\n[dim]Label salvate in adata.obs['lloyd_cluster'][/dim]")
-
 # ══════════════════════════════════════════════════════════════════════════════
 # NOVITÀ v2.0 — Confidence Score su modello esistente
 # ══════════════════════════════════════════════════════════════════════════════
-
 def run_confidence_check(model, feature_names, X=None, y=None):
-    """
-    Opzione [C]: Calcola il confidence score euclideo su un modello già trainato.
-    Labella le cellule troppo lontane dal centroide come Unknown.
-    """
     if not SEMI_AVAILABLE:
         console.print("[red]Moduli core/ non trovati.[/red]")
         return
@@ -837,11 +702,8 @@ def run_confidence_check(model, feature_names, X=None, y=None):
     if X is None:
         console.print("[red]Nessun dataset caricato. Usa opzione 1 prima.[/red]")
         return
-
     console.print("\n[bold cyan]Confidence Score Euclideo[/bold cyan]")
     conf_pct = IntPrompt.ask("Percentile soglia (0-100)", default=95)
-
-    # Allinea feature order e preserva nomi colonna per evitare warning sklearn
     feature_order = list(feature_names) if feature_names is not None else None
     if hasattr(X, "columns"):
         X_df = X.copy()
@@ -852,32 +714,21 @@ def run_confidence_check(model, feature_names, X=None, y=None):
             console.print("[red]Impossibile ricostruire l'ordine delle feature.[/red]")
             return
         X_df = pd.DataFrame(np.asarray(X), columns=feature_order)
-
-    # Prepara dati numpy per la parte euclidea
     X_arr = X_df.values.astype(np.float32)
     y_arr = np.array(y)
     le = LabelEncoder()
     y_enc = le.fit_transform(y_arr)
-
-    from sklearn.model_selection import train_test_split
     X_train_df, X_test_df, y_train, y_test = train_test_split(
         X_df, y_enc, test_size=0.2, random_state=42, stratify=y_enc
     )
     X_train = X_train_df.values.astype(np.float32)
     X_test = X_test_df.values.astype(np.float32)
-
-    # Predizione RF con DataFrame (nomi feature presenti)
     y_pred = model.predict(X_test_df)
-
-    # Encode delle label predette per matchare le chiavi dei centroidi (y_train è encodato)
     try:
         y_pred_enc = le.transform(y_pred)
     except Exception:
-        # Caso limite: RF produce label non viste in training (o mismatch).
-        # Mettiamo -1 e poi verrà forzato Unknown.
         known = set(le.classes_)
         y_pred_enc = np.array([le.transform([lbl])[0] if lbl in known else -1 for lbl in y_pred], dtype=int)
-
     try:
         scores, unknown_mask = euclidean_confidence(
             X_test=X_test,
@@ -889,9 +740,8 @@ def run_confidence_check(model, feature_names, X=None, y=None):
         final_labels = label_with_confidence(y_pred_enc, unknown_mask, le)
     except Exception as e:
         console.print(f"[red]Errore durante confidence: {type(e).__name__}: {e}[/red]")
-        console.print("[dim]Suggerimento: prova di nuovo con un altro dataset o riduci confidenza percentile.[/dim]")
+        console.print("[dim]Suggerimento: prova di nuovo con un altro dataset o riduci il percentile.[/dim]")
         return
-
     n_unknown = unknown_mask.sum()
     console.print(Panel(
         f"[bold]Cellule analizzate:[/bold]  {len(y_pred)}\n"
@@ -900,27 +750,27 @@ def run_confidence_check(model, feature_names, X=None, y=None):
         f"[bold]Soglia:[/bold]              {conf_pct}° percentile intra-classe",
         title="[bold]Risultati Confidence[/bold]", border_style="yellow",
     ))
-
-    # Tabella campione
     table = Table(title="Campione cellule Unknown (prime 20)", box=box.SIMPLE)
     table.add_column("Idx", style="dim", justify="right")
     table.add_column("RF Label")
     table.add_column("Final Label")
     table.add_column("Score", justify="right")
+
     unknown_idx = np.where(unknown_mask)[0]
+    unknown_idx = np.where(unknown_mask)[0]
+
     for i in unknown_idx[:20]:
-        rf_label = y_pred[i]
+        rf_label = str(y_pred[i]) 
         table.add_row(
             str(i),
             Text(rf_label, style=color_map.get(rf_label)),
-            Text(final_labels[i], style="red bold"),
+            Text(str(final_labels[i]), style="red bold"), 
             Text(f"{scores[i]:.2f}", style="red"),
-        )
+        )   
+
     if len(unknown_idx) > 20:
         console.print(f"[dim]... e altri {len(unknown_idx)-20} Unknown[/dim]")
     console.print(table)
-
-    # Distribuzione score
     table2 = Table(title="Distribuzione score per classe", box=box.SIMPLE)
     table2.add_column("Classe")
     table2.add_column("Score medio", justify="right")
@@ -937,173 +787,21 @@ def run_confidence_check(model, feature_names, X=None, y=None):
             str(n_unk),
         )
     console.print(table2)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# NOVITÀ v2.0 — Dashboard TUI live (CPU · Cluster · Confusion)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def run_dashboard(semi_result=None):
-    """
-    Opzione [D]: Dashboard live con:
-      - CPU Raspberry Pi (psutil)
-      - Confusion matrix dell'ultimo run
-      - Statistiche cluster
-      - Avanzamento confidence
-    """
-    try:
-        import psutil
-        HAS_PSUTIL = True
-    except ImportError:
-        HAS_PSUTIL = False
-        console.print("[yellow]psutil non installato — CPU monitor disabilitato.[/yellow]")
-        console.print("[dim]pip install psutil[/dim]")
-
-    if semi_result is None:
-        console.print("[yellow]Nessun risultato semi-supervisionato disponibile.[/yellow]")
-        console.print("[dim]Esegui prima la pipeline [S] per popolare la dashboard.[/dim]")
-        if not HAS_PSUTIL:
-            return
-
-    console.print("\n[bold cyan]Dashboard TUI[/bold cyan] [dim](premi Ctrl+C per uscire)[/dim]\n")
-
-    def make_cpu_panel() -> Panel:
-        if not HAS_PSUTIL:
-            return Panel("[dim]psutil non disponibile[/dim]", title="CPU")
-        cpu_per = psutil.cpu_percent(interval=None, percpu=True)
-        mem = psutil.virtual_memory()
-        lines = []
-        for i, pct in enumerate(cpu_per):
-            bar = "█" * int(pct / 5) + "░" * (20 - int(pct / 5))
-            style = "red" if pct > 80 else "yellow" if pct > 50 else "green"
-            lines.append(f"[dim]Core {i}[/dim] [{style}]{bar}[/{style}] [bold]{pct:5.1f}%[/bold]")
-        mem_bar = "█" * int(mem.percent / 5) + "░" * (20 - int(mem.percent / 5))
-        mem_style = "red" if mem.percent > 80 else "yellow" if mem.percent > 60 else "cyan"
-        lines.append("")
-        lines.append(f"[dim]RAM  [/dim] [{mem_style}]{mem_bar}[/{mem_style}] "
-                     f"[bold]{mem.percent:5.1f}%[/bold]  "
-                     f"[dim]{mem.used//1024//1024}MB / {mem.total//1024//1024}MB[/dim]")
-        try:
-            temps = psutil.sensors_temperatures()
-            if "cpu_thermal" in temps:
-                t = temps["cpu_thermal"][0].current
-                t_style = "red" if t > 75 else "yellow" if t > 65 else "green"
-                lines.append(f"[dim]Temp [/dim] [{t_style}]{t:.1f}°C[/{t_style}]")
-        except Exception:
-            pass
-        return Panel("\n".join(lines), title="[bold]🖥  CPU / RAM — Raspberry Pi[/bold]",
-                     border_style="green")
-
-    def make_cluster_panel() -> Panel:
-        if semi_result is None:
-            return Panel("[dim]Nessun risultato disponibile[/dim]", title="Cluster")
-        cr = semi_result.cluster_result
-        unique, counts = np.unique(cr.labels, return_counts=True)
-        lines = [
-            f"[bold]Algoritmo:[/bold]  Lloyd KMeans",
-            f"[bold]Cluster:[/bold]    {len(unique)}",
-            f"[bold]Iterazioni:[/bold] {cr.n_iter}",
-            f"[bold]Inertia:[/bold]    {cr.inertia:.1f}",
-            "",
-        ]
-        max_c = counts.max()
-        for cl, cnt in zip(unique[:8], counts[:8]):
-            bar = "█" * int((cnt / max_c) * 18)
-            lines.append(f"[dim]C{cl:02d}[/dim] [cyan]{bar:<18}[/cyan] {cnt}")
-        if len(unique) > 8:
-            lines.append(f"[dim]... +{len(unique)-8} altri cluster[/dim]")
-        return Panel("\n".join(lines), title="[bold]🔵  Cluster (Lloyd)[/bold]",
-                     border_style="cyan")
-
-    def make_results_panel() -> Panel:
-        if semi_result is None:
-            return Panel("[dim]Nessun risultato disponibile[/dim]", title="Risultati")
-        r = semi_result
-        le = r.label_encoder
-        acc = r.class_report_dict.get("accuracy", 0.0)
-        lines = [
-            f"[bold]Accuracy:[/bold]    [green]{acc:.2%}[/green]",
-            f"[bold]Geni input:[/bold]  {r.n_genes_original} → [cyan]{r.n_genes_selected}[/cyan]  "
-            f"[dim](riduzione {r.n_genes_original//max(r.n_genes_selected,1)}x)[/dim]",
-            f"[bold]Conflitti:[/bold]   [yellow]{r.n_conflicts}[/yellow]  "
-            f"[dim]({100*r.n_conflicts/max(len(r.y_pred),1):.1f}%)[/dim]",
-            f"[bold]Unknown:[/bold]     [red]{r.n_unknown}[/red]  "
-            f"[dim]({100*r.n_unknown/max(len(r.y_pred),1):.1f}%)[/dim]",
-            "",
-            "[bold]Top 5 marker genes:[/bold]",
-        ]
-        for g, s in zip(r.selected_genes[:5], r.marker_scores[:5]):
-            lines.append(f"  [cyan]{g}[/cyan]  [dim]{s:.4f}[/dim]")
-        return Panel("\n".join(lines), title="[bold]🌲  RF Semi-Supervisionato[/bold]",
-                     border_style="magenta")
-
-    def make_confusion_panel() -> Panel:
-        if semi_result is None:
-            return Panel("[dim]Nessun risultato disponibile[/dim]", title="Confusion")
-        cm = semi_result.confusion_mat
-        le = semi_result.label_encoder
-        classes = le.classes_
-        n = len(classes)
-        if n > 8:
-            return Panel(f"[dim]Confusion matrix {n}×{n}: troppo grande per la dashboard[/dim]",
-                         title="Confusion Matrix")
-        lines = ["[dim]Righe=Reale, Colonne=Predetto[/dim]", ""]
-        header = "         " + "  ".join(f"{c[:5]:>5}" for c in classes)
-        lines.append(f"[dim]{header}[/dim]")
-        for i, cls in enumerate(classes):
-            row = f"[bold]{cls[:5]:>5}[/bold]  "
-            for j in range(n):
-                v = cm[i][j]
-                if i == j:
-                    row += f"[green]{v:>5}[/green]  "
-                elif v > 0:
-                    row += f"[red]{v:>5}[/red]  "
-                else:
-                    row += f"[dim]{v:>5}[/dim]  "
-            lines.append(row)
-        return Panel("\n".join(lines), title="[bold]📊  Confusion Matrix[/bold]",
-                     border_style="yellow")
-
-    # ── Loop live ──────────────────────────────────────────────────────
-    try:
-        with Live(console=console, refresh_per_second=2, screen=False) as live:
-            while True:
-                layout = Layout()
-                layout.split_row(
-                    Layout(name="left"),
-                    Layout(name="right"),
-                )
-                layout["left"].split_column(
-                    Layout(make_cpu_panel(), name="cpu"),
-                    Layout(make_cluster_panel(), name="cluster"),
-                )
-                layout["right"].split_column(
-                    Layout(make_results_panel(), name="results"),
-                    Layout(make_confusion_panel(), name="confusion"),
-                )
-                live.update(layout)
-                time.sleep(0.5)
-    except KeyboardInterrupt:
-        console.print("\n[dim]Dashboard chiusa.[/dim]")
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Save / Load modello
 # ══════════════════════════════════════════════════════════════════════════════
-
 def save_model(model, path="forest_model.pkl"):
     path = normalize_path(path)
     if not path:
         console.print("[red]Path salvataggio vuoto.[/red]")
         return False
     if os.path.isdir(path):
-        console.print(
-            "[red]Il percorso di salvataggio è una directory (atteso file .pkl).[/red] "
-            f"[yellow]{path}[/yellow]"
-        )
+        console.print(f"[red]Il percorso di salvataggio è una directory:[/red] [yellow]{path}[/yellow]")
         return False
     if not path.lower().endswith(".pkl"):
         console.print("[yellow]Attenzione: il nome file non termina con .pkl.[/yellow] Proseguo comunque.")
     parent = os.path.dirname(path)
-    if parent and (not os.path.exists(parent)):
+    if parent and not os.path.exists(parent):
         console.print(f"[red]Directory di output non esistente:[/red] [yellow]{parent}[/yellow]")
         return False
     try:
@@ -1114,8 +812,6 @@ def save_model(model, path="forest_model.pkl"):
         return False
     console.print(f"[green]Modello salvato:[/green] [yellow]{path}[/yellow]")
     return True
-
-
 def load_model(path):
     path = normalize_path(path)
     if not path:
@@ -1138,18 +834,14 @@ def load_model(path):
         return None
     console.print(f"[green]Modello caricato:[/green] [yellow]{path}[/yellow]")
     return model
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Menu principale
 # ══════════════════════════════════════════════════════════════════════════════
-
 def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
     semi_result = None
-
     while True:
         console.print(Rule(style="dim"))
         console.print("[bold]Menu:[/bold]")
-        # Sezione base (originale)
         console.print("  [cyan]1[/cyan]  Carica dataset e allena        [dim](CSV/TSV/Excel/H5AD)[/dim]")
         console.print("  [cyan]2[/cyan]  Albero random")
         console.print("  [cyan]3[/cyan]  Albero a scelta")
@@ -1161,8 +853,6 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
         console.print("  [cyan]9[/cyan]  Carica modello")
         console.print("  [cyan]L[/cyan]  Legenda colori")
         console.print("  [cyan]E[/cyan]  Converti .h5ad → CSV")
-
-        # Opzioni v2.0
         console.print(Rule(characters="─", style="dim cyan"))
         semi_ok = "[green]✓[/green]" if SEMI_AVAILABLE else "[red]✗[/red]"
         console.print(f"  [bold cyan]S[/bold cyan]  Pipeline Semi-Supervisionata   "
@@ -1171,18 +861,12 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
                       f"[dim](standalone, visualizza cluster + marker genes)[/dim] {semi_ok}")
         console.print(f"  [bold cyan]C[/bold cyan]  Confidence Score euclideo      "
                       f"[dim](Unknown / New Cell Type labeling)[/dim] {semi_ok}")
-        console.print(f"  [bold cyan]D[/bold cyan]  Dashboard TUI live             "
-                      f"[dim](CPU Pi · Cluster · Confusion Matrix · RF stats)[/dim]")
         console.print("  [cyan]0[/cyan]  Esci")
         console.print()
-
         valid = ["0","1","2","3","4","5","6","7","8","9","L","l","E","e",
-                 "S","s","K","k","C","c","D","d"]
+                 "S","s","K","k","C","c"]
         choice = Prompt.ask("Scelta", choices=valid).upper()
-
-        # ── Opzioni originali ─────────────────────────────────────────
         if choice == "1":
-            # Loop riprova per path dataset: evita crash e sys.exit
             loaded = False
             for _attempt in range(3):
                 path_in = Prompt.ask("Path dataset di training (file o directory)")
@@ -1196,56 +880,41 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
                     loaded = True
                     break
                 except Exception as e:
-                    console.print(
-                        f"[red]Impossibile caricare dataset:[/red] {type(e).__name__}: {e}"
-                    )
+                    console.print(f"[red]Impossibile caricare dataset:[/red] {type(e).__name__}: {e}")
             if not loaded:
                 console.print("[red]Caricamento dataset fallito. Torno al menu.[/red]")
                 continue
-
             n_trees = IntPrompt.ask("Numero di alberi", default=100)
             md = Prompt.ask("Profondità massima (invio = illimitata)", default="")
             max_depth = int(md) if md.strip() else None
             criterion = ask_criterion()
-
             X, y, feature_names = X_tmp, y_tmp, feature_names_tmp
             try:
                 model = train_model(X, y, n_trees, max_depth, criterion)
             except ValueError as e:
                 console.print(f"[red]Training fallito:[/red] {e}")
-                console.print("[yellow]Torna al menu e riprova con un'altra scelta della colonna target (opzione 1).[/yellow]")
-                model = None
-                feature_names = X = y = None
+                model = None; feature_names = X = y = None
                 continue
-
-            # Carica anche adata se è h5ad (best-effort)
             if path.lower().endswith(".h5ad"):
                 try:
                     import anndata as ad
                     adata = ad.read_h5ad(path)
                 except Exception as e:
-                    console.print(
-                        f"[yellow]Warning:[/yellow] lettura adata .h5ad fallita: {type(e).__name__}: {e}"
-                    )
-
+                    console.print(f"[yellow]Warning:[/yellow] lettura adata fallita: {type(e).__name__}: {e}")
         elif choice == "2":
             if model is None: console.print("[red]Nessun modello caricato.[/red]")
             else: show_tree(model, feature_names, mode="random")
-
         elif choice == "3":
             if model is None: console.print("[red]Nessun modello caricato.[/red]")
             else: show_tree(model, feature_names, mode="choose")
-
         elif choice == "4":
             if model is None: console.print("[red]Nessun modello caricato.[/red]")
             else: show_node_impurity(model, feature_names)
-
         elif choice == "5":
             if model is None: console.print("[red]Nessun modello caricato.[/red]")
             else:
                 top_n = IntPrompt.ask("Quanti geni mostrare", default=20)
                 show_feature_importance(model, feature_names, top_n)
-
         elif choice == "6":
             if X is None: console.print("[red]Carica prima un dataset (opzione 1).[/red]")
             else:
@@ -1255,11 +924,9 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
                 best = compare_criteria(X, y, n_trees, max_depth)
                 if Prompt.ask("Usare il modello migliore?", choices=["s","n"], default="s") == "s":
                     model = best
-
         elif choice == "7":
             if model is None: console.print("[red]Nessun modello caricato.[/red]")
             else: predict_test(model, feature_names)
-
         elif choice == "8":
             if model is None: console.print("[red]Nessun modello caricato.[/red]")
             else:
@@ -1267,48 +934,27 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
                 for _attempt in range(3):
                     path = Prompt.ask("Path salvataggio", default="forest_model.pkl")
                     ok = save_model(model, path)
-                    if ok:
-                        break
-                    console.print("[yellow]Riprovo a salvare...[/yellow]")
+                    if ok: break
                 if not ok:
                     console.print("[red]Salvataggio fallito. Torno al menu.[/red]")
-
         elif choice == "9":
-            # Loop di riprova: guida l'utente se inserisce una directory o un file non valido.
             model = None
             for _attempt in range(3):
                 path = Prompt.ask("Path modello .pkl", default="forest_model.pkl")
                 path_n = normalize_path(path)
-
                 if os.path.isdir(path_n):
-                    console.print(
-                        "[red]Hai inserito una directory, non un file modello.[/red] "
-                        f"[yellow]{path_n}[/yellow]"
-                    )
+                    console.print(f"[red]Hai inserito una directory:[/red] [yellow]{path_n}[/yellow]")
                     continue
-
-                if not path_n.lower().endswith(".pkl"):
-                    console.print(
-                        "[yellow]Attenzione: il percorso non termina con .pkl.[/yellow] "
-                        "Proseguo comunque, ma potrebbe fallire."
-                    )
-
                 model = load_model(path_n)
-                if model is not None:
-                    break
-
+                if model is not None: break
                 console.print("[yellow]Caricamento fallito. Riprova.[/yellow]")
-
             if model is None:
                 console.print("[red]Impossibile caricare un modello. Torno al menu.[/red]")
                 continue
-
             fn = Prompt.ask("Feature names (virgola, o invio)", default="")
             feature_names = [f.strip() for f in fn.split(",")] if fn.strip() else []
-
         elif choice == "L":
             color_map.legend()
-
         elif choice == "E":
             h5ad_path_in = Prompt.ask("Path .h5ad (file o directory)")
             try:
@@ -1323,31 +969,20 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
             df_out.to_csv(out_path, index=False)
             console.print(f"[green]Esportato:[/green] [yellow]{out_path}[/yellow] "
                           f"({df_out.shape[0]} cellule × {len(genes)} geni)")
-
-        # ── Opzioni v2.0 ──────────────────────────────────────────────
         elif choice == "S":
             ret = run_semi_supervised(current_adata=adata)
             if ret is not None and len(ret) == 3:
                 model, feature_names, semi_result = ret
-
         elif choice == "K":
             run_clustering_standalone()
-
         elif choice == "C":
             run_confidence_check(model, feature_names, X, y)
-
-        elif choice == "D":
-            run_dashboard(semi_result)
-
         elif choice == "0":
             console.print("[dim]Arrivederci![/dim]")
             break
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Entry point
 # ══════════════════════════════════════════════════════════════════════════════
-
 def main():
     parser = argparse.ArgumentParser(description="RF Cell Classificator TUI v2.0")
     parser.add_argument("--dataset", help="Path dataset di training")
@@ -1357,16 +992,12 @@ def main():
     parser.add_argument("--semi", action="store_true",
                         help="Avvia direttamente la pipeline semi-supervisionata")
     args = parser.parse_args()
-
     print_banner()
-
     model = feature_names = X = y = adata = None
-
     if args.model:
         model = load_model(args.model)
         if model is None:
             console.print("[yellow]Opzione --model fallita: continuo senza modello.[/yellow]")
-
     if args.dataset:
         try:
             X, y, feature_names = load_dataset(args.dataset)
@@ -1376,20 +1007,14 @@ def main():
                     import anndata as ad
                     adata = ad.read_h5ad(normalize_path(args.dataset))
                 except Exception as e:
-                    console.print(
-                        f"[yellow]Warning:[/yellow] lettura adata .h5ad fallita: {type(e).__name__}: {e}"
-                    )
+                    console.print(f"[yellow]Warning:[/yellow] lettura adata fallita: {type(e).__name__}: {e}")
         except Exception as e:
-            console.print(f"[red]Errore caricamento/training dataset:[/red] {type(e).__name__}: {e}")
+            console.print(f"[red]Errore caricamento/training:[/red] {type(e).__name__}: {e}")
             model = feature_names = X = y = adata = None
-
     if args.semi:
         ret = run_semi_supervised(current_adata=adata)
         if ret:
             return
-
     main_menu(model, feature_names, X, y, adata)
-
-
 if __name__ == "__main__":
     main()

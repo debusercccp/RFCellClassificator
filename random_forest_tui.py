@@ -124,18 +124,22 @@ def print_banner():
 
 def load_h5ad(path, label_col=None):
     path = normalize_path(path)
+    if not path:
+        raise FileNotFoundError("Path .h5ad vuoto")
+    if os.path.isdir(path):
+        raise IsADirectoryError(f"Path è una directory (atteso file .h5ad): {path}")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"File .h5ad non trovato: {path}")
     try:
         import anndata as ad
     except ImportError:
-        console.print("[red]anndata non installata.[/red] pip install anndata")
-        sys.exit(1)
+        raise ImportError("anndata non installata. Installa con: pip install anndata")
     console.print(f"[dim]Lettura AnnData:[/dim] [yellow]{path}[/yellow]")
     adata = ad.read_h5ad(path)
     console.print(f"[green]Letto:[/green] {adata.n_obs} cellule x {adata.n_vars} geni")
     obs_cols = list(adata.obs.columns)
     if not obs_cols:
-        console.print("[red]Nessuna colonna obs trovata.[/red]")
-        sys.exit(1)
+        raise ValueError("Nessuna colonna obs trovata in AnnData")
     if label_col is None or label_col not in obs_cols:
         console.print("\n[bold]Colonne metadati (obs):[/bold]")
         for i, col in enumerate(obs_cols):
@@ -156,6 +160,12 @@ def load_h5ad(path, label_col=None):
 
 def load_dataset(path, label_col=None):
     path = normalize_path(path)
+    if not path:
+        raise FileNotFoundError("Path dataset vuoto")
+    if os.path.isdir(path):
+        raise IsADirectoryError(f"Path è una directory (atteso file): {path}")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"File dataset non trovato: {path}")
     console.print(f"[dim]Caricamento:[/dim] [yellow]{path}[/yellow]")
     ext = os.path.splitext(path)[1].lower()
     if ext in (".h5ad", ".h5", ".hdf5"):
@@ -167,8 +177,7 @@ def load_dataset(path, label_col=None):
     elif ext in (".xlsx", ".xls"):
         df = pd.read_excel(path)
     else:
-        console.print("[red]Formato non supportato.[/red]")
-        sys.exit(1)
+        raise ValueError(f"Formato dataset non supportato: {ext}")
     console.print(f"[green]Caricato:[/green] {df.shape[0]} campioni, {df.shape[1]} colonne")
     if label_col is None:
         console.print("\n[bold]Colonne:[/bold]")
@@ -956,9 +965,29 @@ def run_dashboard(semi_result=None):
 
 def save_model(model, path="forest_model.pkl"):
     path = normalize_path(path)
-    with open(path, "wb") as f:
-        pickle.dump(model, f)
+    if not path:
+        console.print("[red]Path salvataggio vuoto.[/red]")
+        return False
+    if os.path.isdir(path):
+        console.print(
+            "[red]Il percorso di salvataggio è una directory (atteso file .pkl).[/red] "
+            f"[yellow]{path}[/yellow]"
+        )
+        return False
+    if not path.lower().endswith(".pkl"):
+        console.print("[yellow]Attenzione: il nome file non termina con .pkl.[/yellow] Proseguo comunque.")
+    parent = os.path.dirname(path)
+    if parent and (not os.path.exists(parent)):
+        console.print(f"[red]Directory di output non esistente:[/red] [yellow]{parent}[/yellow]")
+        return False
+    try:
+        with open(path, "wb") as f:
+            pickle.dump(model, f)
+    except Exception as e:
+        console.print(f"[red]Impossibile salvare modello:[/red] {type(e).__name__}: {e}")
+        return False
     console.print(f"[green]Modello salvato:[/green] [yellow]{path}[/yellow]")
+    return True
 
 
 def load_model(path):
@@ -1027,20 +1056,40 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
 
         # ── Opzioni originali ─────────────────────────────────────────
         if choice == "1":
-            path = normalize_path(Prompt.ask("Path dataset di training"))
+            # Loop riprova per path dataset: evita crash e sys.exit
+            loaded = False
+            for _attempt in range(3):
+                path_in = Prompt.ask("Path dataset di training")
+                path = normalize_path(path_in)
+                try:
+                    X_tmp, y_tmp, feature_names_tmp = load_dataset(path)
+                    loaded = True
+                    break
+                except Exception as e:
+                    console.print(
+                        f"[red]Impossibile caricare dataset:[/red] {type(e).__name__}: {e}"
+                    )
+            if not loaded:
+                console.print("[red]Caricamento dataset fallito. Torno al menu.[/red]")
+                continue
+
             n_trees = IntPrompt.ask("Numero di alberi", default=100)
             md = Prompt.ask("Profondità massima (invio = illimitata)", default="")
             max_depth = int(md) if md.strip() else None
             criterion = ask_criterion()
-            X, y, feature_names = load_dataset(path)
+
+            X, y, feature_names = X_tmp, y_tmp, feature_names_tmp
             model = train_model(X, y, n_trees, max_depth, criterion)
-            # Carica anche adata se è h5ad
+
+            # Carica anche adata se è h5ad (best-effort)
             if path.lower().endswith(".h5ad"):
                 try:
                     import anndata as ad
                     adata = ad.read_h5ad(path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Warning:[/yellow] lettura adata .h5ad fallita: {type(e).__name__}: {e}"
+                    )
 
         elif choice == "2":
             if model is None: console.print("[red]Nessun modello caricato.[/red]")
@@ -1077,16 +1126,46 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
         elif choice == "8":
             if model is None: console.print("[red]Nessun modello caricato.[/red]")
             else:
-                path = Prompt.ask("Path salvataggio", default="forest_model.pkl")
-                save_model(model, path)
+                ok = False
+                for _attempt in range(3):
+                    path = Prompt.ask("Path salvataggio", default="forest_model.pkl")
+                    ok = save_model(model, path)
+                    if ok:
+                        break
+                    console.print("[yellow]Riprovo a salvare...[/yellow]")
+                if not ok:
+                    console.print("[red]Salvataggio fallito. Torno al menu.[/red]")
 
         elif choice == "9":
-            path = Prompt.ask("Path modello .pkl")
-            model = load_model(path)
+            # Loop di riprova: guida l'utente se inserisce una directory o un file non valido.
+            model = None
+            for _attempt in range(3):
+                path = Prompt.ask("Path modello .pkl", default="forest_model.pkl")
+                path_n = normalize_path(path)
+
+                if os.path.isdir(path_n):
+                    console.print(
+                        "[red]Hai inserito una directory, non un file modello.[/red] "
+                        f"[yellow]{path_n}[/yellow]"
+                    )
+                    continue
+
+                if not path_n.lower().endswith(".pkl"):
+                    console.print(
+                        "[yellow]Attenzione: il percorso non termina con .pkl.[/yellow] "
+                        "Proseguo comunque, ma potrebbe fallire."
+                    )
+
+                model = load_model(path_n)
+                if model is not None:
+                    break
+
+                console.print("[yellow]Caricamento fallito. Riprova.[/yellow]")
+
             if model is None:
-                # Non crashare: torna al menu
-                console.print("[yellow]Nessun modello caricato. Riprova.[/yellow]")
+                console.print("[red]Impossibile caricare un modello. Torno al menu.[/red]")
                 continue
+
             fn = Prompt.ask("Feature names (virgola, o invio)", default="")
             feature_names = [f.strip() for f in fn.split(",")] if fn.strip() else []
 
@@ -1147,14 +1226,20 @@ def main():
             console.print("[yellow]Opzione --model fallita: continuo senza modello.[/yellow]")
 
     if args.dataset:
-        X, y, feature_names = load_dataset(args.dataset)
-        model = train_model(X, y, args.trees, criterion=args.criterion)
-        if args.dataset.endswith(".h5ad"):
-            try:
-                import anndata as ad
-                adata = ad.read_h5ad(normalize_path(args.dataset))
-            except Exception:
-                pass
+        try:
+            X, y, feature_names = load_dataset(args.dataset)
+            model = train_model(X, y, args.trees, criterion=args.criterion)
+            if args.dataset.endswith(".h5ad"):
+                try:
+                    import anndata as ad
+                    adata = ad.read_h5ad(normalize_path(args.dataset))
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Warning:[/yellow] lettura adata .h5ad fallita: {type(e).__name__}: {e}"
+                    )
+        except Exception as e:
+            console.print(f"[red]Errore caricamento/training dataset:[/red] {type(e).__name__}: {e}")
+            model = feature_names = X = y = adata = None
 
     if args.semi:
         ret = run_semi_supervised(current_adata=adata)

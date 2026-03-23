@@ -61,11 +61,3 @@ Random Forest (su soli marker genes)
     └── Euclidean Confidence: dist(cellula, centroide classe)
         score > soglia(95° percentile intra-classe) → "Unknown"
 ```
-
-## Performance stimata su Raspberry Pi 5 (50k cellule, 20k geni)
-
-| Step | v1.0 | v2.0 |
-|------|------|------|
-| Training RF | ~90s | ~8s |
-| Feature space | 20k geni | 200 marker genes |
-| Riduzione | — | 100x |

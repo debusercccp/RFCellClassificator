@@ -71,6 +71,69 @@ def normalize_path(path: str) -> str:
     p = os.path.expanduser(p)
     return os.path.abspath(p)
 
+
+def resolve_dataset_path_input(path_in: str) -> str:
+    """
+    Accetta:
+      - path a un file dataset
+      - oppure path a una directory contenente dataset supportati
+    Se è una directory, chiede quale file usare.
+    """
+    p = normalize_path(path_in)
+    if not p:
+        return p
+
+    if os.path.isdir(p):
+        exts = {".csv", ".tsv", ".txt", ".xlsx", ".xls", ".h5ad", ".h5", ".hdf5"}
+        files: list[str] = []
+        for name in os.listdir(p):
+            fp = os.path.join(p, name)
+            if os.path.isfile(fp) and os.path.splitext(name)[1].lower() in exts:
+                files.append(fp)
+        files.sort()
+
+        if not files:
+            raise FileNotFoundError(
+                f"Nessun dataset supportato trovato in directory: {p}. "
+                f"Estensioni attese: {sorted(exts)}"
+            )
+
+        console.print(f"[dim]Dataset trovati in directory:[/dim] {p}")
+        for i, fp in enumerate(files):
+            console.print(f"  [{i}] {os.path.basename(fp)}")
+        idx = IntPrompt.ask("Indice dataset da usare", default=0)
+        idx = max(0, min(idx, len(files) - 1))
+        return files[idx]
+
+    return p
+
+
+def resolve_h5ad_path_input(path_in: str) -> str:
+    """Come resolve_dataset_path_input, ma limitato a file `.h5ad`."""
+    p = normalize_path(path_in)
+    if not p:
+        return p
+
+    if os.path.isdir(p):
+        files: list[str] = []
+        for name in os.listdir(p):
+            fp = os.path.join(p, name)
+            if os.path.isfile(fp) and name.lower().endswith(".h5ad"):
+                files.append(fp)
+        files.sort()
+
+        if not files:
+            raise FileNotFoundError(f"Nessun file .h5ad trovato in directory: {p}")
+
+        console.print(f"[dim]File .h5ad trovati in directory:[/dim] {p}")
+        for i, fp in enumerate(files):
+            console.print(f"  [{i}] {os.path.basename(fp)}")
+        idx = IntPrompt.ask("Indice file .h5ad da usare", default=0)
+        idx = max(0, min(idx, len(files) - 1))
+        return files[idx]
+
+    return p
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Colori cell type  (identici all'originale)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -473,18 +536,14 @@ def run_semi_supervised(current_adata=None):
 
     # ── Caricamento AnnData ────────────────────────────────────────────
     if current_adata is None:
-        path_in = Prompt.ask("Path dataset H5AD")
-        path = normalize_path(path_in)
+        path_in = Prompt.ask("Path dataset H5AD (file o directory)")
+        try:
+            path = resolve_h5ad_path_input(path_in)
+        except Exception as e:
+            console.print(f"[red]Impossibile scegliere .h5ad:[/red] {type(e).__name__}: {e}")
+            return None, None
         if not path:
             console.print("[red]Path .h5ad vuoto: annullo la pipeline.[/red]")
-            return None, None
-        if os.path.isdir(path):
-            console.print("[red]Hai inserito una directory, atteso un file .h5ad.[/red]")
-            console.print(f"[yellow]{path}[/yellow]")
-            return None, None
-        if not os.path.exists(path):
-            console.print("[red]File .h5ad non trovato.[/red]")
-            console.print(f"[yellow]{path}[/yellow]")
             return None, None
         try:
             console.print(f"[dim]Lettura:[/dim] [yellow]{path}[/yellow]")
@@ -711,18 +770,14 @@ def run_clustering_standalone():
         console.print("[red]anndata non installata.[/red]")
         return
 
-    path_in = Prompt.ask("Path dataset H5AD")
-    path = normalize_path(path_in)
+    path_in = Prompt.ask("Path dataset H5AD (file o directory)")
+    try:
+        path = resolve_h5ad_path_input(path_in)
+    except Exception as e:
+        console.print(f"[red]Impossibile scegliere .h5ad:[/red] {type(e).__name__}: {e}")
+        return
     if not path:
         console.print("[red]Path .h5ad vuoto: annullo clustering.[/red]")
-        return
-    if os.path.isdir(path):
-        console.print("[red]Hai inserito una directory, atteso un file .h5ad.[/red]")
-        console.print(f"[yellow]{path}[/yellow]")
-        return
-    if not os.path.exists(path):
-        console.print("[red]File .h5ad non trovato.[/red]")
-        console.print(f"[yellow]{path}[/yellow]")
         return
     try:
         adata = ad.read_h5ad(path)
@@ -1130,8 +1185,12 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
             # Loop riprova per path dataset: evita crash e sys.exit
             loaded = False
             for _attempt in range(3):
-                path_in = Prompt.ask("Path dataset di training")
-                path = normalize_path(path_in)
+                path_in = Prompt.ask("Path dataset di training (file o directory)")
+                try:
+                    path = resolve_dataset_path_input(path_in)
+                except Exception as e:
+                    console.print(f"[red]Impossibile scegliere dataset:[/red] {type(e).__name__}: {e}")
+                    path = normalize_path(path_in)
                 try:
                     X_tmp, y_tmp, feature_names_tmp = load_dataset(path)
                     loaded = True
@@ -1251,7 +1310,12 @@ def main_menu(model=None, feature_names=None, X=None, y=None, adata=None):
             color_map.legend()
 
         elif choice == "E":
-            h5ad_path = normalize_path(Prompt.ask("Path .h5ad"))
+            h5ad_path_in = Prompt.ask("Path .h5ad (file o directory)")
+            try:
+                h5ad_path = resolve_h5ad_path_input(h5ad_path_in)
+            except Exception as e:
+                console.print(f"[red]Impossibile scegliere .h5ad:[/red] {type(e).__name__}: {e}")
+                continue
             out_path = normalize_path(Prompt.ask("Output CSV", default="expression_matrix.csv"))
             Xe, ye, genes = load_h5ad(h5ad_path)
             df_out = Xe.copy()

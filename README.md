@@ -20,22 +20,21 @@ RFCellClassificator/
 ## Avvio rapido
 
 ```bash
-# Classico (identico a v1.0)
+# Classico 
 python random_forest_tui.py
 
 # Pipeline semi-supervisionata diretta
 python random_forest_tui.py --semi
 
-# Nix (con openblas ottimizzato per Pi)
+# Nix 
 nix develop
 python random_forest_tui.py
 ```
 
-## Opzioni menu v2.0
+## Opzioni menu
 
 | Tasto | Funzione |
 |-------|---------|
-| `1-9` | Tutte le opzioni originali (invariate) |
 | `S`   | **Pipeline semi-supervisionata**: Clustering → Marker Genes → RF → Consensus → Confidence |
 | `K`   | **Clustering standalone**: Lloyd KMeans + visualizzazione cluster + marker genes |
 | `C`   | **Confidence score**: distanza euclidea cellula → centroide, Unknown labeling |

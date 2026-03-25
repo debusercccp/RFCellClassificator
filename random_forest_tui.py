@@ -757,7 +757,6 @@ def run_confidence_check(model, feature_names, X=None, y=None):
     table.add_column("Score", justify="right")
 
     unknown_idx = np.where(unknown_mask)[0]
-    unknown_idx = np.where(unknown_mask)[0]
 
     for i in unknown_idx[:20]:
         rf_label = str(y_pred[i]) 
